@@ -2,14 +2,68 @@
 # machine learning models.
 
 import numpy as np
-from os.path import exists
+import os
+# from os.path import exists
+import pathlib
 import inspect
+import tensorflow as tf
 # import pyyaml
 from openpyxl import load_workbook, Workbook
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc
 from sklearn.metrics import precision_score, recall_score, f1_score, balanced_accuracy_score
 from sklearn.metrics import roc_auc_score, mean_squared_error, accuracy_score
+
+
+class ImageDataset:
+    def __init__(self, filepath, labels=None, image_type='jpg', search_type='*'):
+        self.filepath = pathlib.Path(filepath)
+        if not self.filepath.exists():
+            raise ValueError(f"{self.filepath} is not a valid path.")
+        elif not self.filepath.is_dir():
+            raise ValueError(f"{self.filepath} is not a directory.")
+
+        if labels is None and search_type == '*':
+            self.search_type = '*/*'
+        else:
+            self.search_type = search_type
+
+        self.path_list = tf.data.Dataset.list_files(str(self.filepath/self.search_type), shuffle=False)
+
+        if labels is None:
+            self.labels = self.__get_labels()
+        else:
+            self.labels = labels
+
+        self.image_type = image_type
+
+        self.image_count = len(list(self.filepath.glob(self.search_type)))
+
+    # Instance method that provides a short
+    # description of the class instance created.
+    def __str__(self):
+        return f"This is an instance of the image dataset in {self.filepath}"
+
+    def __get_labels(self):
+        class_names = np.array(sorted([item.name for item in self.filepath.glob('*') if item.name != "LICENSE.txt"]))
+        # Convert the path to a list of path components
+        parts = tf.strings.split(self.path_list, os.path.sep)
+        # The second to last is the class-directory
+        one_hot = parts[-2] == class_names
+        # Integer encode the label
+        return tf.argmax(one_hot)
+
+    def decode_image(self, img, resize):
+        if self.image_type == 'jpg':
+            # Convert the compressed string to a 3D uint8 tensor
+            img = tf.io.decode_jpeg(img, channels=3)
+            # Resize the image to the desired size
+            return tf.image.resize(img, resize)
+        else:
+            raise TypeError(f"No compatibility for type: {self.image_type} implemented yet.")
+
+    def split_set(self, val_size=None, resize=None):
+        pass
 
 
 def initialize_function(func_name, *args, **kwargs):
@@ -97,7 +151,7 @@ def get_metrics(y_true, y_pred, index=None, data=None, labels=None, classifier=N
 
     if filename is not None:
         print(f"Filename is {filename}")
-        if exists(filename):
+        if os.path.exists(filename):
             wb = load_workbook(filename)
             ws = wb.active
             new_row_index = ws.max_row
@@ -123,7 +177,7 @@ if __name__ == '__main__':
     y_true = [0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1]
     y_pred = [1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0]
 
-    get_metrics(y_true, y_pred, verbose=False, filename='results.xlsx')
+    cc = ImageDataset('C:\\Users\\dimka\\Documents\\Alumil')
 
 else:
     print('Main module did not execute')
