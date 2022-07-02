@@ -16,54 +16,124 @@ from sklearn.metrics import roc_auc_score, mean_squared_error, accuracy_score
 
 
 class ImageDataset:
-    def __init__(self, filepath, labels=None, image_type='jpg', search_type='*'):
+
+    AUTOTUNE = tf.data.AUTOTUNE
+    label_counter = 0
+
+    def __init__(self, filepath, entries=None, labels=None, image_type='jpg', search_type='*'):
         self.filepath = pathlib.Path(filepath)
+        self.str_filepath = filepath
+        self.entries = entries
+
+        if labels is None:
+            self.no_labels = True
+        else:
+            self.no_labels = False
+
         if not self.filepath.exists():
             raise ValueError(f"{self.filepath} is not a valid path.")
         elif not self.filepath.is_dir():
             raise ValueError(f"{self.filepath} is not a directory.")
 
-        if labels is None and search_type == '*':
+        if self.no_labels and search_type == '*':
             self.search_type = '*/*'
+            self.path_list = tf.data.Dataset.list_files(str(self.filepath / self.search_type), shuffle=False)
         else:
             self.search_type = search_type
+            # entries = os.listdir(self.str_filepath)
+            # entries.sort(key=len)
+            img_paths = []
+            for entry in self.entries:
+                img_paths.append(os.path.join(filepath, entry))
+            self.path_list = tf.data.Dataset.from_tensor_slices(img_paths)
 
-        self.path_list = tf.data.Dataset.list_files(str(self.filepath/self.search_type), shuffle=False)
-
-        if labels is None:
-            self.labels = self.__get_labels()
+        if self.no_labels:
+            self.labels = np.array(sorted([item.name for item in self.filepath.glob('*') if item.name != "LICENSE.txt"]))
         else:
-            self.labels = labels
+            self.labels = labels.to_numpy()
 
         self.image_type = image_type
 
         self.image_count = len(list(self.filepath.glob(self.search_type)))
+
+        self.dataset = tf.data.Dataset
 
     # Instance method that provides a short
     # description of the class instance created.
     def __str__(self):
         return f"This is an instance of the image dataset in {self.filepath}"
 
-    def __get_labels(self):
-        class_names = np.array(sorted([item.name for item in self.filepath.glob('*') if item.name != "LICENSE.txt"]))
-        # Convert the path to a list of path components
-        parts = tf.strings.split(self.path_list, os.path.sep)
-        # The second to last is the class-directory
-        one_hot = parts[-2] == class_names
-        # Integer encode the label
-        return tf.argmax(one_hot)
+    def get_path_list(self):
+        return self.path_list
 
-    def decode_image(self, img, resize):
+    def get_dataset(self):
+        return self.dataset
+
+    def set_dataset(self, ds):
+        self.dataset = ds
+
+    def _get_labels(self, filepath):
+
+        if self.no_labels:
+            # Convert the path to a list of path components
+            parts = tf.strings.split(filepath, os.path.sep)
+            # The second to last is the class-directory
+            one_hot = parts[-2] == self.labels
+            # Integer encode the label
+            return tf.argmax(one_hot)
+        else:
+            label = self.labels[self.label_counter]
+            self.label_counter += 1
+            return label
+
+    def _decode_image(self, img, resize):
         if self.image_type == 'jpg':
             # Convert the compressed string to a 3D uint8 tensor
             img = tf.io.decode_jpeg(img, channels=3)
-            # Resize the image to the desired size
-            return tf.image.resize(img, resize)
+
         else:
             raise TypeError(f"No compatibility for type: {self.image_type} implemented yet.")
 
-    def split_set(self, val_size=None, resize=None):
-        pass
+        if resize is not None:
+            # Resize the image to the desired size
+            return tf.image.resize(img, resize)
+        else:
+            return img
+
+    def create_image_label_set(self, filepath):
+
+        label = self._get_labels(filepath)
+        # Load the raw data from the file as a string
+        img = tf.io.read_file(filepath)
+        img = self._decode_image(img, resize=[224, 224])
+
+        return img, label
+
+    def create_image_dataset(self, num_parallel_calls=AUTOTUNE):
+
+        self.set_dataset(self.path_list.map(self.create_image_label_set, num_parallel_calls))
+
+        return self.get_dataset()
+
+    @staticmethod
+    def performance_config(ds,
+                           cache=True,
+                           shuffle=False,
+                           shuffle_buff_size=1000,
+                           batch_size=32,
+                           prefetch=True,
+                           prefetch_buff_size=AUTOTUNE):
+
+        if cache is True:
+            ds = ds.cache()
+        if shuffle is True:
+                ds = ds.shuffle(buffer_size=shuffle_buff_size)
+        if batch_size is not None:
+            ds = ds.batch(batch_size)
+        if prefetch is True:
+            ds = ds.prefetch(buffer_size=prefetch_buff_size)
+
+        return ds
 
 
 def initialize_function(func_name, *args, **kwargs):
@@ -174,10 +244,114 @@ def get_metrics(y_true, y_pred, index=None, data=None, labels=None, classifier=N
 
 
 if __name__ == '__main__':
-    y_true = [0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1]
-    y_pred = [1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0]
+    import pathlib
+    import pandas as pd
 
-    cc = ImageDataset('C:\\Users\\dimka\\Documents\\Alumil')
+    with tf.device("cpu:0"):
+        image_path = r'C:\Users\dimka\Documents\Dermoscopy_Dataset\datasets\All BCC'
+
+        labels = pd.read_csv('labels.csv', index_col=0).to_numpy()
+
+        data_dir = pathlib.Path(image_path)
+
+        list_ds = tf.data.Dataset.list_files(str(data_dir / '*'), shuffle=False)
+        image_count = len(list(data_dir.glob('*.jpg')))
+        print(f"There is a total of {image_count} images.")
+
+        val_size = int(image_count * 0.2)
+        train_ds = list_ds.skip(val_size)
+        val_ds = list_ds.take(val_size)
+
+        batch_size = 32
+        img_height = 224
+        img_width = 224
+
+        # global label_counter
+
+        label_counter = 0
+
+        def get_label(file_path):
+            global label_counter
+            label = labels[label_counter]
+            label_counter += 1
+            return label
+
+        def decode_img(img):
+            # Convert the compressed string to a 3D uint8 tensor
+            img = tf.io.decode_jpeg(img, channels=3)
+            # Resize the image to the desired size
+            return tf.image.resize(img, [img_height, img_width])
+
+
+        def process_path(file_path):
+            label = get_label(file_path)
+            # Load the raw data from the file as a string
+            img = tf.io.read_file(file_path)
+            img = decode_img(img)
+            return img, label
+
+
+        AUTOTUNE = tf.data.AUTOTUNE
+
+        # Set `num_parallel_calls` so multiple images are loaded/processed in parallel.
+        train_ds = train_ds.map(process_path, num_parallel_calls=AUTOTUNE)
+        val_ds = val_ds.map(process_path, num_parallel_calls=AUTOTUNE)
+
+
+        def configure_for_performance(ds):
+            ds = ds.cache()
+            ds = ds.shuffle(buffer_size=1000)
+            ds = ds.batch(batch_size)
+            ds = ds.prefetch(buffer_size=AUTOTUNE)
+            return ds
+
+
+        train_ds = configure_for_performance(train_ds)
+        val_ds = configure_for_performance(val_ds)
+
+        preprocess_input = tf.keras.applications.resnet.preprocess_input
+
+        IMG_SHAPE = (224, 224, 3)
+
+        # import tensorflow as tf
+
+        base_model = tf.keras.applications.resnet.ResNet152(
+            include_top=False,
+            weights='imagenet',
+            input_shape=IMG_SHAPE,
+        )
+        base_model.trainable = False
+
+        image_batch, label_batch = next(iter(train_ds))
+
+        feature_batch = base_model(image_batch)
+        print(feature_batch.shape)
+        global_average_layer = tf.keras.layers.GlobalAveragePooling2D()
+        feature_batch_average = global_average_layer(feature_batch)
+
+        prediction_layer = tf.keras.layers.Softmax()
+        prediction_batch = prediction_layer(feature_batch_average)
+        print("Reached model definition")
+        inputs = tf.keras.Input(shape=IMG_SHAPE)
+        # x = data_augmentation(inputs)
+        x = preprocess_input(inputs)
+        x = base_model(x, training=False)
+        x = global_average_layer(x)
+        x = tf.keras.layers.Dropout(0.2)(x)
+        outputs = prediction_layer(x)
+        model = tf.keras.Model(inputs, outputs)
+        print('Reached Compile')
+        base_learning_rate = 0.0001
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=base_learning_rate),
+                      loss=tf.keras.losses.SparseCategoricalCrossentropy(),
+                      metrics=['accuracy', 'AUC', 'Precision', 'Recall'])
+        print('Reached Training')
+        temp_hist = model.fit(train_ds,
+                              epochs=20,
+                              validation_data=val_ds)
+
+
+
 
 else:
     print('Main module did not execute')
