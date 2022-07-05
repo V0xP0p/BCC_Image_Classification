@@ -9,7 +9,7 @@ import inspect
 import tensorflow as tf
 # import pyyaml
 from openpyxl import load_workbook, Workbook
-from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import StratifiedKFold, train_test_split, StratifiedGroupKFold
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc
 from sklearn.metrics import precision_score, recall_score, f1_score, balanced_accuracy_score
 from sklearn.metrics import roc_auc_score, mean_squared_error, accuracy_score
@@ -177,6 +177,9 @@ def split_data(data, labels, split_strategy='StratifiedKFold', **kwargs):
         return zip(split_method.split(data, labels), range(split_method.n_splits))
     elif split_strategy == 'train_test_split':
         return initialize_function(split_strategy, data, labels, **kwargs)
+    elif split_strategy == 'StratifiedGroupKFold':
+        split_method = initialize_function(split_strategy, **kwargs)
+        return zip(split_method.split(data, labels), range(split_method.n_splits))
 
 
 def get_classifier():
@@ -241,6 +244,80 @@ def get_metrics(y_true, y_pred, index=None, data=None, labels=None, classifier=N
             wb.save(filename)
 
     return precision, recall, f1, acc, bacc
+
+
+def save_metrics(filename, metrics=None, labels=None):
+
+    if metrics is not None:
+        if os.path.exists(filename):
+            wb = load_workbook(filename)
+            ws = wb.active
+            previous_row = [metric.value for metric in ws[ws.min_row]]
+            if len(previous_row) != len(metrics)+1:
+                raise ValueError(f"Expected {len(previous_row)} arguments and instead {len(metrics)} were passed.")
+            new_row_index = ws.max_row + 1
+            row = [f"Experiment {new_row_index-1}"]
+            # metrics = [metric[0] for metric in metrics]
+            row.extend(metrics)
+            ws.append(row)
+            wb.save(filename)
+        else:
+            wb = Workbook()
+            ws = wb.active
+            if labels is None:
+                raise ValueError(f"For first time initialization variables 'metrics' and 'labels' must be "
+                                 f"passed explicitly."
+                                 f"Current Values:"
+                                 f"labels= {labels}")
+
+            metrics = [f"Experiment 1"] + metrics   #[metric[0] for metric in metrics]
+
+            labels = ["Experiment Number"] + labels
+            rows = [labels, metrics]
+            for row in rows:
+                ws.append(row)
+            wb.save(filename)
+    else:
+        raise ValueError(f"For first time initialization variables 'metrics' and 'labels' must be "
+                         f"passed explicitly."
+                         f"Current Values:"
+                         f"metrics= {metrics}")
+
+
+def read_metrics(filename, exp_num=None):
+
+    if os.path.exists(filename):
+        wb = load_workbook(filename)
+        ws = wb.active
+
+        max_idx = ws.max_row
+        min_idx = ws.min_row
+
+        labels = [label.value for label in ws[1]]
+        # labels = labels[1:]
+
+        if exp_num is None:
+            # if exp_num is none retrieve the metrics for the last experiment
+            metrics = [metric.value for metric in ws[max_idx]]
+            metrics_dict = dict(zip(labels, metrics))
+        else:
+            exp_num_type = type(exp_num)
+            if exp_num_type == list:
+                metrics_dict = dict()
+                for experiment in exp_num:
+                    metrics = [metric.value for metric in ws[experiment + 1]]
+                    metrics_dict[f"Experiment {experiment}"] = dict(zip(labels[1:], metrics[1:]))
+            elif exp_num_type == int:
+                metrics = [metric.value for metric in ws[exp_num + 1]]
+                metrics_dict = dict(zip(labels, metrics))
+            else:
+                raise TypeError(f"The value of the argument 'exp_num' must be of type 'list' or 'int'"
+                                f"Currently exp_num is of type: {exp_num_type}")
+
+        return max_idx-1, metrics_dict
+
+    else:
+        return 1, None
 
 
 if __name__ == '__main__':
