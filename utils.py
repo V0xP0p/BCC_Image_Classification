@@ -2,6 +2,7 @@
 # machine learning models.
 
 import numpy as np
+import pandas as pd
 import os
 # from os.path import exists
 import pathlib
@@ -320,116 +321,42 @@ def read_metrics(filename, exp_num=None):
         return 1, None
 
 
+def balance_data_by_reduction(data):
+    """
+    Balances a dataset by reducing its rows with respect to the class
+    that has the least labels. Not suited for highly unbalanced datasets.
+
+    :param data: a pandas dataframe of the labels in one-hot format.
+    :return: the sorted indices of the reduced dataset
+    """
+
+    data_len = len(data)
+    num_classes = data.shape[1]
+
+    class_freq = [ x/data_len for x in list(np.sum(data, axis=0))]
+
+    least_class = np.argmin(class_freq)
+    class_size = np.sum(data.iloc[:, least_class])
+
+    indices = []
+    indices.extend(data[data.iloc[:, least_class] == 1].index)
+
+    for pred_class in range(num_classes):
+        if pred_class != least_class:
+            indices.extend(np.random.choice(data[data.iloc[:, pred_class] == 1].index, class_size, replace=False))
+
+    indices.sort()
+
+    return indices
+
+
+def one_hot_to_integers(df):
+
+    return pd.DataFrame(df.apply(np.argmax, axis=1))
+
+
 if __name__ == '__main__':
-    import pathlib
-    import pandas as pd
-
-    with tf.device("cpu:0"):
-        image_path = r'C:\Users\dimka\Documents\Dermoscopy_Dataset\datasets\All BCC'
-
-        labels = pd.read_csv('labels.csv', index_col=0).to_numpy()
-
-        data_dir = pathlib.Path(image_path)
-
-        list_ds = tf.data.Dataset.list_files(str(data_dir / '*'), shuffle=False)
-        image_count = len(list(data_dir.glob('*.jpg')))
-        print(f"There is a total of {image_count} images.")
-
-        val_size = int(image_count * 0.2)
-        train_ds = list_ds.skip(val_size)
-        val_ds = list_ds.take(val_size)
-
-        batch_size = 32
-        img_height = 224
-        img_width = 224
-
-        # global label_counter
-
-        label_counter = 0
-
-        def get_label(file_path):
-            global label_counter
-            label = labels[label_counter]
-            label_counter += 1
-            return label
-
-        def decode_img(img):
-            # Convert the compressed string to a 3D uint8 tensor
-            img = tf.io.decode_jpeg(img, channels=3)
-            # Resize the image to the desired size
-            return tf.image.resize(img, [img_height, img_width])
-
-
-        def process_path(file_path):
-            label = get_label(file_path)
-            # Load the raw data from the file as a string
-            img = tf.io.read_file(file_path)
-            img = decode_img(img)
-            return img, label
-
-
-        AUTOTUNE = tf.data.AUTOTUNE
-
-        # Set `num_parallel_calls` so multiple images are loaded/processed in parallel.
-        train_ds = train_ds.map(process_path, num_parallel_calls=AUTOTUNE)
-        val_ds = val_ds.map(process_path, num_parallel_calls=AUTOTUNE)
-
-
-        def configure_for_performance(ds):
-            ds = ds.cache()
-            ds = ds.shuffle(buffer_size=1000)
-            ds = ds.batch(batch_size)
-            ds = ds.prefetch(buffer_size=AUTOTUNE)
-            return ds
-
-
-        train_ds = configure_for_performance(train_ds)
-        val_ds = configure_for_performance(val_ds)
-
-        preprocess_input = tf.keras.applications.resnet.preprocess_input
-
-        IMG_SHAPE = (224, 224, 3)
-
-        # import tensorflow as tf
-
-        base_model = tf.keras.applications.resnet.ResNet152(
-            include_top=False,
-            weights='imagenet',
-            input_shape=IMG_SHAPE,
-        )
-        base_model.trainable = False
-
-        image_batch, label_batch = next(iter(train_ds))
-
-        feature_batch = base_model(image_batch)
-        print(feature_batch.shape)
-        global_average_layer = tf.keras.layers.GlobalAveragePooling2D()
-        feature_batch_average = global_average_layer(feature_batch)
-
-        prediction_layer = tf.keras.layers.Softmax()
-        prediction_batch = prediction_layer(feature_batch_average)
-        print("Reached model definition")
-        inputs = tf.keras.Input(shape=IMG_SHAPE)
-        # x = data_augmentation(inputs)
-        x = preprocess_input(inputs)
-        x = base_model(x, training=False)
-        x = global_average_layer(x)
-        x = tf.keras.layers.Dropout(0.2)(x)
-        outputs = prediction_layer(x)
-        model = tf.keras.Model(inputs, outputs)
-        print('Reached Compile')
-        base_learning_rate = 0.0001
-        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=base_learning_rate),
-                      loss=tf.keras.losses.SparseCategoricalCrossentropy(),
-                      metrics=['accuracy', 'AUC', 'Precision', 'Recall'])
-        print('Reached Training')
-        temp_hist = model.fit(train_ds,
-                              epochs=20,
-                              validation_data=val_ds)
-
-
-
-
+    print("This is the main module")
 else:
     print('Main module did not execute')
 
