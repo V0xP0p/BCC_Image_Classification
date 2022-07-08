@@ -137,6 +137,66 @@ class ImageDataset:
         return ds
 
 
+def _check_args(params_to_check):
+    def inner(func):
+        def wrapper(*args, **kwargs):
+            for param_to_check in params_to_check:
+                if param_to_check not in inspect.signature(func).parameters:
+                    raise TypeError(f"Parameter '{param_to_check}' must be passed")
+                return func(*args, **kwargs)
+        return wrapper
+    return inner
+
+
+class Logger:
+
+    def __init__(self, verbose=True):
+        self.verbose = verbose
+
+    def set_verbosity(self, verbose=True):
+        self.verbose = verbose
+
+    @_check_args(params_to_check=['filename', 'values'])
+    def to_excel(self, filename, values):
+
+        if os.path.exists(filename):
+
+            wb = load_workbook(filename)
+            ws = wb.active
+            title_row = ws[ws.min_row]
+            labels = {key.value: value for (key, value) in zip(title_row, range(1, len(title_row)+1))}
+            # labels = [cell.value for cell in ws[ws.min_row]]
+            # # if len(labels) != len(values) + 1:
+            # #     raise ValueError(f"Expected {len(labels) - 1} arguments and instead {len(values)} were passed.")
+            new_row_index = ws.max_row + 1
+
+            _ = ws.cell(new_row_index, 1, f"Experiment {new_row_index - 1}")
+
+            for label, value in values.items():
+                if label in labels:
+                    _ = ws.cell(new_row_index, labels[label], value)
+                else:
+                    col_idx = ws.max_column + 1
+                    _ = ws.cell(ws.min_row, col_idx, label)
+                    _ = ws.cell(new_row_index, col_idx, value)
+
+            wb.save(filename)
+
+        else:
+            wb = Workbook()
+            ws = wb.active
+            labels = ["Experiment No"] + list(values.keys())
+            ws.append(labels)
+            row = [f"Experiment 1"]
+            row.extend(values.values())
+            ws.append(row)
+            wb.save(filename)
+
+        if self.verbose is True:
+            for label, value in values.items():
+                print(f"{label}: {value}")
+
+
 def initialize_function(func_name, *args, **kwargs):
     """
     Call a function with specific parameters initialized otherwise
