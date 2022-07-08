@@ -8,6 +8,7 @@ import os
 import pathlib
 import inspect
 import tensorflow as tf
+import json
 # import pyyaml
 from openpyxl import load_workbook, Workbook
 from sklearn.model_selection import StratifiedKFold, train_test_split, StratifiedGroupKFold
@@ -170,7 +171,9 @@ class Logger:
             # #     raise ValueError(f"Expected {len(labels) - 1} arguments and instead {len(values)} were passed.")
             new_row_index = ws.max_row + 1
 
-            _ = ws.cell(new_row_index, 1, f"Experiment {new_row_index - 1}")
+            experiment_num = new_row_index - 1
+
+            _ = ws.cell(new_row_index, 1, f"Experiment {experiment_num}")
 
             for label, value in values.items():
                 if label in labels:
@@ -192,9 +195,17 @@ class Logger:
             ws.append(row)
             wb.save(filename)
 
+            experiment_num = 1
+
         if self.verbose is True:
             for label, value in values.items():
                 print(f"{label}: {value}")
+
+        return experiment_num
+
+    @_check_args(params_to_check=['filename', 'values'])
+    def to_json(self, filename, values):
+        json.dump(values, open(filename, 'w'))
 
 
 def initialize_function(func_name, *args, **kwargs):
