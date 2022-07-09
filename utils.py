@@ -60,6 +60,8 @@ class ImageDataset:
 
         self.dataset = tf.data.Dataset
 
+
+
     # Instance method that provides a short
     # description of the class instance created.
     def __str__(self):
@@ -120,19 +122,24 @@ class ImageDataset:
     @staticmethod
     def performance_config(ds,
                            cache=True,
-                           shuffle=False,
-                           shuffle_buff_size=1000,
+                           shuffle=True,
+                           shuffle_buff_size=300,
                            batch_size=32,
+                           augment=False,
+                           augmentation=None,
                            prefetch=True,
                            prefetch_buff_size=AUTOTUNE):
 
-        if cache is True:
+        if cache:
             ds = ds.cache()
-        if shuffle is True:
-                ds = ds.shuffle(buffer_size=shuffle_buff_size)
+        if shuffle:
+            ds = ds.shuffle(buffer_size=shuffle_buff_size)
         if batch_size is not None:
             ds = ds.batch(batch_size)
-        if prefetch is True:
+        if augment:
+            ds = ds.map(lambda x, y: (augmentation(x, training=True), y),
+                        num_parallel_calls=prefetch_buff_size)
+        if prefetch:
             ds = ds.prefetch(buffer_size=prefetch_buff_size)
 
         return ds
@@ -198,8 +205,10 @@ class Logger:
             experiment_num = 1
 
         if self.verbose is True:
+            print(f"\nLogged the following variables:")
+            print(30 * '-')
             for label, value in values.items():
-                print(f"{label}: {value}")
+                print(f"{label}: {value:.2f}")
 
         return experiment_num
 
