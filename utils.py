@@ -52,7 +52,10 @@ class ImageDataset:
         if self.no_labels:
             self.labels = np.array(sorted([item.name for item in self.filepath.glob('*') if item.name != "LICENSE.txt"]))
         else:
-            self.labels = labels.to_numpy()
+            if type(labels) == pd.DataFrame:
+                self.labels = labels.to_numpy()
+            else:
+                self.labels = labels
 
         self.image_type = image_type
 
@@ -215,6 +218,23 @@ class Logger:
     @_check_args(params_to_check=['filename', 'values'])
     def to_json(self, filename, values):
         json.dump(values, open(filename, 'w'))
+
+
+def get_stemmed_filename(filename, cast_type=None):
+    """Function that accepts a filename and extracts the filename
+    the final path component without its suffix.
+
+    :param filename: the filename we want to stem
+    :param cast_type: the type we want to cast the result to.
+                    i.e. int, str, float etc.
+
+    :return: stemmed filename in the type specified
+    """
+
+    if cast_type is None:
+        return pathlib.Path(filename).stem
+    else:
+        return cast_type(pathlib.Path(filename).stem)
 
 
 def initialize_function(func_name, *args, **kwargs):
@@ -428,6 +448,52 @@ def balance_data_by_reduction(data):
     indices.sort()
 
     return indices
+
+
+def reorder_image_labels(filepath,
+                         labels,
+                         index_start=1,
+                         valid_extensions=('.jpg', '.png', '.bmp', '.gif')):
+    """
+    Reorders the labels of an image dataset sorted with the
+    alphanumeric order of image files found in the directory.
+    Assumes images named '1.extension', '2.extension' etc. where
+    the number corresponds with the index of the correct label
+    depending on index_start.
+
+    :param filepath: the filepath where the images reside.
+    :param labels: a list of integers containing the labels
+                    for each image in ascending order.
+    :param index_start: integer specifies the starting index of
+                        the images. Defaults to 1.
+    :param valid_extensions: list of strings, contains the valid file extensions
+                            i.e. ['.png', '.jpg']
+    :return: a list of labels ordered based on the alphanumeric
+            file order.
+    """
+
+    image_paths = []
+
+    # iterate through all subfolders and files in
+    # the filepath.
+    for _, _, files in os.walk(filepath):
+        # iterate through all files in the directory.
+        for file in files:
+            # check if the file extension is in valid extensions.
+            if os.path.splitext(file)[1].lower() in valid_extensions:
+                # add only valid filetypes.
+                image_paths.append(file)
+
+    reordered_labels = []
+    # iterate through all the files found.
+    for image in image_paths:
+        # update the index of the label based on the filename
+        # taking into account the index start.
+        position = int(os.path.splitext(image)[0]) - index_start
+        # add the reordered label to a list.
+        reordered_labels.append(labels[position])
+
+    return reordered_labels
 
 
 def one_hot_to_integers(df):
